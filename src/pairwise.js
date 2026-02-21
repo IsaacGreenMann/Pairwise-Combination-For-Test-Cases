@@ -15,6 +15,11 @@
 /** Delimiter for pair keys. Must not appear in parameter names or values. */
 const PAIR_SEP = '\x00';
 
+/** Values that mean "don't care" — they do not participate in pair coverage. */
+function isDontCare(val) {
+  return val == null || val === '' || val === '-';
+}
+
 /**
  * Build a canonical key for the pair (paramA, valueA) × (paramB, valueB).
  * Order is normalized by parameter name so (A, vA, B, vB) and (B, vB, A, vA) yield the same key.
@@ -107,9 +112,8 @@ export function getPairsCoveredByRow(row, paramNames) {
     const b = paramNames[j];
     const va = row[a];
     const vb = row[b];
-    if (va != null && vb != null) {
-      keys.add(toPairKey(a, va, b, vb));
-    }
+    if (isDontCare(va) || isDontCare(vb)) continue;
+    keys.add(toPairKey(a, va, b, vb));
   }
   return Array.from(keys);
 }
@@ -213,7 +217,7 @@ function isForbiddenWithRow(forbiddenSet, row, pName, value, namesUpToP) {
   for (let i = 0; i < namesUpToP.length; i++) {
     const otherName = namesUpToP[i];
     const otherVal = row[otherName];
-    if (otherVal == null) continue;
+    if (isDontCare(otherVal)) continue;
     const key = toPairKey(otherName, otherVal, pName, value);
     if (forbiddenSet.has(key)) return true;
   }
@@ -291,19 +295,28 @@ export function generatePairwiseSimple(params, constraints = null) {
     const pValues = params[pIdx].values;
     const namesUpToP = names.slice(0, pIdx);
 
-    // Horizontal: extend each row with a value that covers the most new pairs and respects constraints
+    // Horizontal: extend each row with a value that covers the most new pairs and respects constraints.
+    // Prioritize values that cover pairs only this row can cover (avoids adding a vertical row later).
+    // Use lexicographic (onlyThisRowCanCover, newPairs) so we prefer saving a vertical row over covering more pairs elsewhere.
     for (const row of rows) {
       let bestValue = null;
-      let bestCount = -1;
+      let bestOnlyThis = -1;
+      let bestNewPairs = -1;
       for (const v of pValues) {
         if (isForbiddenWithRow(forbiddenSet, row, pName, v, namesUpToP)) continue;
         let newPairs = 0;
+        let onlyThisRowCanCover = 0;
         for (let i = 0; i < pIdx; i++) {
           const key = toPairKey(names[i], row[names[i]], pName, v);
-          if (!covered.has(key)) newPairs++;
+          if (!covered.has(key)) {
+            newPairs++;
+            const numRowsWithOther = rows.filter((r) => r[names[i]] === row[names[i]]).length;
+            if (numRowsWithOther === 1) onlyThisRowCanCover++;
+          }
         }
-        if (newPairs > bestCount) {
-          bestCount = newPairs;
+        if (onlyThisRowCanCover > bestOnlyThis || (onlyThisRowCanCover === bestOnlyThis && newPairs > bestNewPairs)) {
+          bestOnlyThis = onlyThisRowCanCover;
+          bestNewPairs = newPairs;
           bestValue = v;
         }
       }
