@@ -561,3 +561,139 @@
 .test-count-msg strong {
   color: var(--text);
 }
+
+/* ----- Constraints ----- */
+.constraints-section {
+  margin-bottom: 1.25rem;
+  padding: 1.25rem;
+  background: rgba(251, 146, 60, 0.06);
+  border: 1px solid rgba(251, 146, 60, 0.35);
+  border-radius: var(--radius);
+}
+
+.constraints-section h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.constraints-section .hint {
+  margin: 0 0 1rem;
+}
+
+.constraint-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.constraint-select {
+  padding: 0.5rem 0.65rem;
+  background: var(--surface2);
+  border: 1px solid rgba(251, 146, 60, 0.4);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 0.9rem;
+  min-width: 120px;
+}
+
+.constraint-select:focus {
+  outline: none;
+  border-color: #fb923c;
+  box-shadow: 0 0 0 2px rgba(251, 146, 60, 0.2);
+}
+
+.constraint-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.constraint-sep {
+  color: rgba(251, 146, 60, 0.9);
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.btn-constraint-add {
+  background: rgba(251, 146, 60, 0.2);
+  color: #fb923c;
+  border-color: rgba(251, 146, 60, 0.5);
+}
+
+.btn-constraint-add:hover:not(:disabled) {
+  background: rgba(251, 146, 60, 0.35);
+  border-color: #fb923c;
+}
+
+.constraint-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.constraint-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.65rem;
+  background: var(--surface2);
+  border: 1px solid rgba(251, 146, 60, 0.45);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  color: var(--text);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.constraint-pill-highlight {
+  border-color: #fb923c;
+  box-shadow: 0 0 0 2px rgba(251, 146, 60, 0.25);
+}
+
+.constraint-pill-text {
+  font-family: var(--fontMono);
+}
+
+.constraint-x {
+  margin: 0 0.2rem;
+  color: rgba(251, 146, 60, 0.9);
+  font-weight: 600;
+}
+
+.constraint-pill-remove {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+  background: transparent;
+  border: 1px solid rgba(251, 146, 60, 0.4);
+  border-radius: 6px;
+  color: #fb923c;
+  cursor: pointer;
+}
+
+.constraint-pill-remove:hover {
+  background: rgba(251, 146, 60, 0.2);
+}
+
+.btn-generate {
+  position: relative;
+}
+
+.generate-badge {
+  margin-left: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  opacity: 0.95;
+}
+
+.test-table tbody tr.row-constraint-highlight {
+  background: rgba(251, 146, 60, 0.12);
+}
+
+.test-table tbody tr.row-constraint-highlight:hover {
+  background: rgba(251, 146, 60, 0.18);
+}

@@ -19,11 +19,29 @@ const PAIR_SEP = '\x00';
  * Build a canonical key for the pair (paramA, valueA) × (paramB, valueB).
  * Order is normalized by parameter name so (A, vA, B, vB) and (B, vB, A, vA) yield the same key.
  */
-function toPairKey(paramA, valueA, paramB, valueB) {
+export function toPairKey(paramA, valueA, paramB, valueB) {
   if (paramA < paramB) {
     return `${paramA}${PAIR_SEP}${valueA}${PAIR_SEP}${paramB}${PAIR_SEP}${valueB}`;
   }
   return `${paramB}${PAIR_SEP}${valueB}${PAIR_SEP}${paramA}${PAIR_SEP}${valueA}`;
+}
+
+/** Constraint: { paramA, valueA, paramB, valueB } — this pair must not appear in any test case. */
+function constraintToPairKey(c) {
+  return toPairKey(c.paramA, c.valueA, c.paramB, c.valueB);
+}
+
+/**
+ * Build the set of forbidden pair keys from a list of constraints.
+ * @param constraints { Array<{ paramA, valueA, paramB, valueB }> }
+ */
+export function getForbiddenPairKeys(constraints) {
+  const set = new Set();
+  if (!constraints || constraints.length === 0) return set;
+  for (const c of constraints) {
+    set.add(constraintToPairKey(c));
+  }
+  return set;
 }
 
 /**
@@ -40,8 +58,9 @@ function* paramPairIndices(n) {
 /**
  * Compute the set of all pairs that must be covered.
  * Uses params array order: pairs are (params[i], params[j]) for i < j (table column order).
+ * If forbiddenSet is provided, pairs in it are excluded (constraint feature).
  */
-export function getAllPairsToCover(params) {
+export function getAllPairsToCover(params, forbiddenSet = null) {
   const keys = new Set();
   const n = params.length;
   for (const [i, j] of paramPairIndices(n)) {
@@ -51,7 +70,9 @@ export function getAllPairsToCover(params) {
     const valuesB = params[j].values;
     for (const va of valuesA) {
       for (const vb of valuesB) {
-        keys.add(toPairKey(nameA, va, nameB, vb));
+        const key = toPairKey(nameA, va, nameB, vb);
+        if (forbiddenSet && forbiddenSet.has(key)) continue;
+        keys.add(key);
       }
     }
   }
@@ -112,6 +133,70 @@ export function verifyCoverage(requiredPairs, coveredSet) {
 }
 
 /**
+ * Check that no test case row contains a forbidden pair.
+ * Returns { valid: boolean, violations: Array<{ rowIndex, pairKey }> }.
+ */
+export function validateConstraints(testCases, paramNames, forbiddenSet) {
+  if (!forbiddenSet || forbiddenSet.size === 0) {
+    return { valid: true, violations: [] };
+  }
+  const violations = [];
+  for (let rowIndex = 0; rowIndex < testCases.length; rowIndex++) {
+    const row = testCases[rowIndex];
+    const keys = getPairsCoveredByRow(row, paramNames);
+    for (const key of keys) {
+      if (forbiddenSet.has(key)) {
+        violations.push({ rowIndex, pairKey: key });
+      }
+    }
+  }
+  return {
+    valid: violations.length === 0,
+    violations,
+  };
+}
+
+/**
+ * Detect if constraints make generation impossible: some value of a parameter
+ * has no valid pairing with any value of another parameter (all pairs forbidden).
+ * Returns { conflict: boolean, message?: string }.
+ */
+export function checkConstraintConflict(params, constraints) {
+  const forbidden = getForbiddenPairKeys(constraints);
+  if (forbidden.size === 0) return { conflict: false };
+  const names = params.map((p) => p.name);
+  for (const c of constraints) {
+    const paramA = params.find((p) => p.name === c.paramA);
+    const paramB = params.find((p) => p.name === c.paramB);
+    if (!paramA || !paramB) continue;
+    // For value c.valueA in paramA, count how many paramB values are allowed
+    let allowedB = 0;
+    for (const vb of paramB.values) {
+      const key = toPairKey(c.paramA, c.valueA, c.paramB, vb);
+      if (!forbidden.has(key)) allowedB++;
+    }
+    if (allowedB === 0) {
+      return {
+        conflict: true,
+        message: `Constraint conflict: ${c.paramA}: ${c.valueA} has no valid pairing with any value of ${c.paramB}.`,
+      };
+    }
+    let allowedA = 0;
+    for (const va of paramA.values) {
+      const key = toPairKey(c.paramA, va, c.paramB, c.valueB);
+      if (!forbidden.has(key)) allowedA++;
+    }
+    if (allowedA === 0) {
+      return {
+        conflict: true,
+        message: `Constraint conflict: ${c.paramB}: ${c.valueB} has no valid pairing with any value of ${c.paramA}.`,
+      };
+    }
+  }
+  return { conflict: false };
+}
+
+/**
  * Format a pair key for display.
  */
 export function formatPairKey(key) {
@@ -121,11 +206,24 @@ export function formatPairKey(key) {
   return `(${p1}: ${v1}, ${p2}: ${v2})`;
 }
 
-// --- IPO test case generation ---
+// --- IPO test case generation (with optional constraints) ---
 
-function addVerticalRows(params, names, rows, covered, pIdx) {
+function isForbiddenWithRow(forbiddenSet, row, pName, value, namesUpToP) {
+  if (!forbiddenSet || forbiddenSet.size === 0) return false;
+  for (let i = 0; i < namesUpToP.length; i++) {
+    const otherName = namesUpToP[i];
+    const otherVal = row[otherName];
+    if (otherVal == null) continue;
+    const key = toPairKey(otherName, otherVal, pName, value);
+    if (forbiddenSet.has(key)) return true;
+  }
+  return false;
+}
+
+function addVerticalRows(params, names, rows, covered, pIdx, forbiddenSet) {
   const pName = names[pIdx];
   const pValues = params[pIdx].values;
+  const namesUpToP = names.slice(0, pIdx + 1);
   let added = true;
   while (added) {
     added = false;
@@ -136,13 +234,22 @@ function addVerticalRows(params, names, rows, covered, pIdx) {
         for (const otherVal of otherValues) {
           const key = toPairKey(otherName, otherVal, pName, v);
           if (covered.has(key)) continue;
+          if (forbiddenSet && forbiddenSet.has(key)) continue;
           const newRow = { [pName]: v, [otherName]: otherVal };
           for (let j = 0; j < pIdx; j++) {
             if (names[j] === otherName) continue;
-            newRow[names[j]] = params[j].values[0];
+            const colName = names[j];
+            const colValues = params[j].values;
+            let chosen = null;
+            for (const cv of colValues) {
+              if (isForbiddenWithRow(forbiddenSet, newRow, colName, cv, names.slice(0, pIdx + 1))) continue;
+              chosen = cv;
+              break;
+            }
+            newRow[names[j]] = chosen != null ? chosen : colValues[0];
           }
           rows.push(newRow);
-          const newKeys = getPairsCoveredByRow(newRow, names.slice(0, pIdx + 1));
+          const newKeys = getPairsCoveredByRow(newRow, namesUpToP);
           for (const k of newKeys) covered.add(k);
           added = true;
           break;
@@ -154,18 +261,21 @@ function addVerticalRows(params, names, rows, covered, pIdx) {
   }
 }
 
-export function generatePairwiseSimple(params) {
+export function generatePairwiseSimple(params, constraints = null) {
   if (params.length === 0) return [];
   if (params.length === 1) {
     return params[0].values.map((v) => ({ [params[0].name]: v }));
   }
 
+  const forbiddenSet = constraints && constraints.length > 0 ? getForbiddenPairKeys(constraints) : null;
   const names = params.map((p) => p.name);
   const rows = [];
 
-  // First two parameters: full Cartesian product
+  // First two parameters: Cartesian product excluding forbidden pairs
   for (const v0 of params[0].values) {
     for (const v1 of params[1].values) {
+      const key = toPairKey(names[0], v0, names[1], v1);
+      if (forbiddenSet && forbiddenSet.has(key)) continue;
       rows.push({ [names[0]]: v0, [names[1]]: v1 });
     }
   }
@@ -179,12 +289,14 @@ export function generatePairwiseSimple(params) {
   for (let pIdx = 2; pIdx < params.length; pIdx++) {
     const pName = names[pIdx];
     const pValues = params[pIdx].values;
+    const namesUpToP = names.slice(0, pIdx);
 
-    // Horizontal: extend each row with a value that covers the most new pairs
+    // Horizontal: extend each row with a value that covers the most new pairs and respects constraints
     for (const row of rows) {
-      let bestValue = pValues[0];
+      let bestValue = null;
       let bestCount = -1;
       for (const v of pValues) {
+        if (isForbiddenWithRow(forbiddenSet, row, pName, v, namesUpToP)) continue;
         let newPairs = 0;
         for (let i = 0; i < pIdx; i++) {
           const key = toPairKey(names[i], row[names[i]], pName, v);
@@ -195,20 +307,27 @@ export function generatePairwiseSimple(params) {
           bestValue = v;
         }
       }
-      row[pName] = bestValue;
-      for (let i = 0; i < pIdx; i++) {
-        covered.add(toPairKey(names[i], row[names[i]], pName, row[pName]));
+      if (bestValue != null) {
+        row[pName] = bestValue;
+        for (let i = 0; i < pIdx; i++) {
+          covered.add(toPairKey(names[i], row[names[i]], pName, row[pName]));
+        }
+      } else {
+        row[pName] = pValues[0];
+        for (let i = 0; i < pIdx; i++) {
+          covered.add(toPairKey(names[i], row[names[i]], pName, row[pName]));
+        }
       }
     }
 
-    addVerticalRows(params, names, rows, covered, pIdx);
+    addVerticalRows(params, names, rows, covered, pIdx, forbiddenSet);
   }
 
   return rows;
 }
 
-export function generatePairwise(params) {
-  return generatePairwiseSimple(params);
+export function generatePairwise(params, constraints = null) {
+  return generatePairwiseSimple(params, constraints);
 }
 
 const MAX_PERMUTE = 8;
@@ -231,10 +350,11 @@ function permuteIndices(n, tryOrder) {
 
 /**
  * Returns a reordered copy of params that minimizes the number of test cases
- * (generatePairwise(order).length). For n <= MAX_PERMUTE uses full permutation search;
- * for larger n uses a heuristic (sort by value count ascending).
+ * (generatePairwise(order, constraints).length). For n <= MAX_PERMUTE uses full
+ * permutation search; for larger n uses a heuristic (sort by value count ascending).
+ * Constraints are respected when evaluating each order.
  */
-export function optimizeParameterOrder(params) {
+export function optimizeParameterOrder(params, constraints = null) {
   if (params.length < 2) return params.map((p) => ({ name: p.name, values: [...p.values] }));
   const n = params.length;
 
@@ -243,7 +363,7 @@ export function optimizeParameterOrder(params) {
     let bestCount = Infinity;
     permuteIndices(n, (indices) => {
       const ordered = indices.map((i) => params[i]);
-      const rows = generatePairwise(ordered);
+      const rows = generatePairwise(ordered, constraints);
       if (rows.length < bestCount) {
         bestCount = rows.length;
         bestOrder = ordered;
